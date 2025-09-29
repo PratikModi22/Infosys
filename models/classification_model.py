@@ -1,11 +1,15 @@
 """
-Classification model for VinBigData Chest X-ray abnormalities
+Simple classification model for VinBigData Chest X-ray abnormalities.
+
+What this file does:
+- Provides a minimal, easy-to-understand multi-label classifier (ResNet18)
+- Implements a simple focal-BCE loss for class imbalance
+- Includes a tiny metrics helper for macro F1 etc.
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
-import timm
 from typing import Dict, List, Optional, Tuple
 import logging
 
@@ -13,112 +17,63 @@ logger = logging.getLogger(__name__)
 
 class ChestXrayClassifier(nn.Module):
     """
-    Multi-label classification model for chest X-ray abnormalities
+    Minimal multi-label classifier using ResNet-18 as a feature extractor.
+
+    Easy version:
+    - ResNet18 backbone (pretrained on ImageNet)
+    - Single linear layer head to 14 classes
+    - Outputs raw logits for BCEWithLogits-based losses
     """
     
-    def __init__(self, 
-                 num_classes: int = 14,
-                 backbone: str = "efficientnet-b4",
-                 pretrained: bool = True,
-                 dropout_rate: float = 0.3):
+    def __init__(self, num_classes: int = 14, pretrained: bool = True):
         super(ChestXrayClassifier, self).__init__()
         
-        self.num_classes = num_classes
-        self.backbone_name = backbone
+        backbone = models.resnet18(pretrained=pretrained)
+        in_features = backbone.fc.in_features
+        backbone.fc = nn.Identity()
+        self.backbone = backbone
         
-        # Load backbone
-        if backbone.startswith("efficientnet"):
-            self.backbone = timm.create_model(backbone, pretrained=pretrained)
-            # Get number of features from backbone
-            self.feature_dim = self.backbone.classifier.in_features
-            # Remove the original classifier
-            self.backbone.classifier = nn.Identity()
-        elif backbone.startswith("resnet"):
-            self.backbone = models.__dict__[backbone](pretrained=pretrained)
-            self.feature_dim = self.backbone.fc.in_features
-            self.backbone.fc = nn.Identity()
-        else:
-            raise ValueError(f"Unsupported backbone: {backbone}")
-        
-        # Custom classifier head
-        self.classifier = nn.Sequential(
-            nn.Dropout(dropout_rate),
-            nn.Linear(self.feature_dim, 512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout_rate),
-            nn.Linear(512, 256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout_rate),
-            nn.Linear(256, num_classes)
-        )
-        
-        # Initialize weights
+        self.classifier = nn.Linear(in_features, num_classes)
         self._initialize_weights()
     
     def _initialize_weights(self):
         """Initialize classifier weights"""
-        for m in self.classifier.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.constant_(m.bias, 0)
+        nn.init.xavier_uniform_(self.classifier.weight)
+        nn.init.constant_(self.classifier.bias, 0)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass"""
-        # Extract features
         features = self.backbone(x)
-        
-        # Classification
         logits = self.classifier(features)
-        
         return logits
     
     def get_attention_maps(self, x: torch.Tensor) -> torch.Tensor:
-        """Get attention maps for visualization"""
-        # This would be implemented for Grad-CAM
-        # For now, return the feature maps from the last conv layer
-        if hasattr(self.backbone, 'get_attention_maps'):
-            return self.backbone.get_attention_maps(x)
-        else:
-            # Fallback: return the input for now
-            return x
+        """
+        Placeholder for attention maps (used by Grad-CAM tools).
+        Returns input as a simple fallback.
+        """
+        return x
 
 class MultiLabelLoss(nn.Module):
     """
-    Custom loss function for multi-label classification
+    Simple focal-BCE loss to handle class imbalance in multi-label tasks.
     """
     
-    def __init__(self, 
-                 pos_weight: Optional[torch.Tensor] = None,
-                 class_weights: Optional[torch.Tensor] = None,
-                 focal_alpha: float = 0.25,
-                 focal_gamma: float = 2.0):
+    def __init__(self, pos_weight: Optional[torch.Tensor] = None,
+                 focal_alpha: float = 0.25, focal_gamma: float = 2.0):
         super(MultiLabelLoss, self).__init__()
-        
         self.pos_weight = pos_weight
-        self.class_weights = class_weights
         self.focal_alpha = focal_alpha
         self.focal_gamma = focal_gamma
-        
-        # Base BCE loss
-        self.bce_loss = nn.BCEWithLogitsLoss(
-            pos_weight=pos_weight,
-            weight=class_weights,
-            reduction='none'
-        )
+        self.bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight, reduction='none')
     
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """Compute focal loss for multi-label classification"""
-        # Compute BCE loss
-        bce_loss = self.bce_loss(logits, targets)
-        
-        # Compute focal loss
+        """Compute focal-weighted BCE loss averaged over batch and classes."""
+        bce = self.bce(logits, targets)
         probs = torch.sigmoid(logits)
         pt = torch.where(targets == 1, probs, 1 - probs)
-        focal_weight = self.focal_alpha * (1 - pt) ** self.focal_gamma
-        
-        focal_loss = focal_weight * bce_loss
-        
-        return focal_loss.mean()
+        focal = self.focal_alpha * (1 - pt) ** self.focal_gamma
+        return (focal * bce).mean()
 
 class ClassificationMetrics:
     """
@@ -189,15 +144,14 @@ class ClassificationMetrics:
         return metrics
 
 def create_model(config: Dict) -> ChestXrayClassifier:
-    """Create model from configuration"""
-    model = ChestXrayClassifier(
+    """
+    Build a ResNet18-based classifier from a simple config dict.
+    Expected keys: 'num_classes', optional 'pretrained'
+    """
+    return ChestXrayClassifier(
         num_classes=config['num_classes'],
-        backbone=config['backbone'],
-        pretrained=config.get('pretrained', True),
-        dropout_rate=config.get('dropout_rate', 0.3)
+        pretrained=config.get('pretrained', True)
     )
-    
-    return model
 
 def load_pretrained_weights(model: ChestXrayClassifier, checkpoint_path: str) -> ChestXrayClassifier:
     """Load pretrained weights from checkpoint"""
@@ -234,9 +188,7 @@ if __name__ == "__main__":
     # Test model creation
     config = {
         'num_classes': 14,
-        'backbone': 'efficientnet-b4',
-        'pretrained': True,
-        'dropout_rate': 0.3
+        'pretrained': True
     }
     
     model = create_model(config)
