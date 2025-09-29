@@ -1,5 +1,10 @@
 """
-Main script for VinBigData Chest X-ray project
+Main entry point for the VinBigData Chest X-ray project.
+
+What this file does:
+- Exposes simple CLI commands for data prep, training, tuning, and interpretability
+- Uses clear defaults (e.g., 2GB subset) for quick starts
+- Keeps function responsibilities small and well-named
 """
 import argparse
 import logging
@@ -32,17 +37,17 @@ def setup_logging(log_level: str = "INFO"):
     )
 
 def data_preparation_pipeline(args):
-    """Run data preparation pipeline"""
+    """Run the basic data preparation steps (subset, converts, splits)."""
     logger = logging.getLogger(__name__)
     logger.info("Starting data preparation pipeline...")
     
     # Initialize processor
     processor = VinBigDataProcessor(args.data_dir)
     
-    # Create 5GB subset
+    # Create subset (~2GB by default)
     if args.subset_size > 0:
         logger.info(f"Creating {args.subset_size}GB subset...")
-        selected_files = processor.create_5gb_subset(args.subset_size)
+        selected_files = processor.create_subset(args.subset_size)
         logger.info(f"Created subset with {len(selected_files)} files")
     
     # Convert DICOM to PNG
@@ -67,7 +72,7 @@ def data_preparation_pipeline(args):
     logger.info("Data preparation completed!")
 
 def classification_training_pipeline(args):
-    """Run classification training pipeline"""
+    """Train a simple classification model with train/val loaders."""
     logger = logging.getLogger(__name__)
     logger.info("Starting classification training...")
     
@@ -108,7 +113,7 @@ def classification_training_pipeline(args):
     logger.info("Classification training completed!")
 
 def detection_training_pipeline(args):
-    """Run detection training pipeline"""
+    """Train a YOLO-based detection model using a YAML data config."""
     logger = logging.getLogger(__name__)
     logger.info("Starting detection training...")
     
@@ -149,7 +154,7 @@ def detection_training_pipeline(args):
     logger.info("Detection training completed!")
 
 def hyperparameter_tuning_pipeline(args):
-    """Run hyperparameter tuning pipeline"""
+    """Run Optuna or Grid Search over classification hyperparameters."""
     logger = logging.getLogger(__name__)
     logger.info("Starting hyperparameter tuning...")
     
@@ -198,7 +203,7 @@ def hyperparameter_tuning_pipeline(args):
     logger.info("Hyperparameter tuning completed!")
 
 def interpretability_pipeline(args):
-    """Run interpretability analysis pipeline"""
+    """Create Grad-CAM and prediction analysis visualizations for a model."""
     logger = logging.getLogger(__name__)
     logger.info("Starting interpretability analysis...")
     
@@ -234,7 +239,7 @@ def main():
     # Data preparation
     data_parser = subparsers.add_parser('data', help='Data preparation pipeline')
     data_parser.add_argument('--data_dir', type=str, required=True, help='Path to raw dataset')
-    data_parser.add_argument('--subset_size', type=float, default=5.0, help='Subset size in GB')
+    data_parser.add_argument('--subset_size', type=float, default=2.0, help='Subset size in GB')
     data_parser.add_argument('--convert_images', action='store_true', help='Convert DICOM to PNG')
     data_parser.add_argument('--convert_annotations', action='store_true', help='Convert annotations')
     data_parser.add_argument('--create_splits', action='store_true', help='Create train/val/test splits')

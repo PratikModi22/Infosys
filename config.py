@@ -1,5 +1,10 @@
 """
-Configuration file for VinBigData Chest X-ray project
+Configuration for the VinBigData Chest X-ray project.
+
+What this file does:
+- Defines common paths used across the project
+- Stores simple, readable configuration dictionaries for dataset, models, training, and logging
+- Ensures required directories exist
 """
 import os
 from pathlib import Path
@@ -20,7 +25,8 @@ for dir_path in [DATA_DIR, RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, RESULTS
 # Dataset configuration
 DATASET_CONFIG = {
     "name": "VinBigData_Chest_Xray",
-    "subset_size_gb": 5,
+    # Default subset size for quick experiments (training on a smaller subset)
+    "subset_size_gb": 2,
     "image_formats": ["PNG", "JPEG"],
     "target_resolution": (512, 512),
     "num_classes": 14,  # Number of abnormality classes
@@ -45,7 +51,8 @@ DATASET_CONFIG = {
 # Model configuration
 MODEL_CONFIG = {
     "classification": {
-        "backbone": "efficientnet-b4",
+        # Simpler, beginner-friendly backbone
+        "backbone": "resnet18",
         "num_classes": 14,
         "input_size": (512, 512),
         "batch_size": 16,

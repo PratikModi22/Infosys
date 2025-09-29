@@ -1,5 +1,11 @@
 """
-Data utilities for VinBigData Chest X-ray dataset preparation
+Data utilities for preparing the VinBigData Chest X-ray dataset.
+
+What this file does:
+- Creates a smaller subset of the dataset (default 2GB) for fast training
+- Provides a simple DICOM→PNG converter
+- Converts annotations from CSV to YOLO and COCO formats
+- Creates train/val/test CSV splits
 """
 import os
 import pandas as pd
@@ -18,16 +24,30 @@ from config import DATASET_CONFIG, PROCESSED_DATA_DIR
 logger = logging.getLogger(__name__)
 
 class VinBigDataProcessor:
-    """Main class for processing VinBigData dataset"""
+    """
+    Main helper for data prep.
+
+    Responsibilities:
+    - Manage paths and outputs under `data/processed`
+    - Build a size-limited subset by sampling images per class
+    - Offer simple image and annotation conversion utilities
+    - Create CSV splits for train/val/test
+    """
     
     def __init__(self, data_dir: str):
         self.data_dir = Path(data_dir)
         self.processed_dir = PROCESSED_DATA_DIR
         self.processed_dir.mkdir(parents=True, exist_ok=True)
         
-    def create_5gb_subset(self, target_size_gb: float = 5.0) -> List[str]:
+    def create_subset(self, target_size_gb: float = 2.0) -> List[str]:
         """
-        Create a 5GB subset of the dataset by selecting diverse samples
+        Create a subset (default ~2GB) by sampling images from each class.
+
+        Parameters:
+        - target_size_gb: approximate desired size on disk in gigabytes.
+
+        Returns:
+        - List of selected image_ids included in the subset.
         """
         logger.info(f"Creating {target_size_gb}GB subset of the dataset...")
         
@@ -46,16 +66,16 @@ class VinBigDataProcessor:
             if current_size >= target_size_bytes:
                 break
                 
-            # Sample from each class
-            sample_size = min(len(group), max(1, len(group) // 10))  # Take 10% from each class
+            # Sample a small portion from each class to keep diversity
+            sample_size = min(len(group), max(1, len(group) // 10))
             sampled = group.sample(n=sample_size, random_state=42)
             
             for _, row in sampled.iterrows():
                 if current_size >= target_size_bytes:
                     break
                     
-                # Estimate file size (DICOM files are typically 1-5MB)
-                estimated_size = 2 * 1024 * 1024  # 2MB estimate
+                # Estimate per-image size to accumulate toward target (rough DICOM avg)
+                estimated_size = 2 * 1024 * 1024  # ~2MB estimate
                 
                 if current_size + estimated_size <= target_size_bytes:
                     selected_files.append(row['image_id'])
@@ -71,7 +91,12 @@ class VinBigDataProcessor:
     def convert_dicom_to_png(self, dicom_path: str, output_path: str, 
                            target_size: Tuple[int, int] = (512, 512)) -> bool:
         """
-        Convert DICOM file to PNG format with preprocessing
+        Convert a single DICOM file to an 8-bit PNG.
+
+        Steps:
+        - Read pixel data, apply windowing if present
+        - Normalize to 0–255, resize to target, and save as PNG
+        Returns True on success, False otherwise.
         """
         try:
             # Read DICOM file
@@ -106,7 +131,9 @@ class VinBigDataProcessor:
     
     def apply_windowing(self, image: np.ndarray, window_center: float, 
                        window_width: float) -> np.ndarray:
-        """Apply DICOM windowing to enhance contrast"""
+        """
+        Apply DICOM windowing to enhance contrast.
+        """
         window_min = window_center - window_width / 2
         window_max = window_center + window_width / 2
         
@@ -119,7 +146,9 @@ class VinBigDataProcessor:
         return image
     
     def normalize_image(self, image: np.ndarray) -> np.ndarray:
-        """Normalize image to 0-255 range"""
+        """
+        Normalize image to 0–255 (uint8) for PNG saving.
+        """
         # Handle different bit depths
         if image.dtype == np.uint16:
             # Convert 16-bit to 8-bit
@@ -134,7 +163,9 @@ class VinBigDataProcessor:
     
     def convert_annotations_to_yolo(self, csv_path: str, output_dir: str) -> bool:
         """
-        Convert CSV annotations to YOLO format
+        Convert annotations (CSV) to YOLO txt files.
+
+        One file per image with lines: `class_id cx cy w h` (normalized).
         """
         try:
             df = pd.read_csv(csv_path)
@@ -184,7 +215,7 @@ class VinBigDataProcessor:
     
     def convert_annotations_to_coco(self, csv_path: str, output_path: str) -> bool:
         """
-        Convert CSV annotations to COCO format
+        Convert annotations (CSV) to a single COCO-style JSON file.
         """
         try:
             df = pd.read_csv(csv_path)
@@ -253,7 +284,7 @@ class VinBigDataProcessor:
     def create_data_splits(self, metadata_path: str, train_ratio: float = 0.7, 
                           val_ratio: float = 0.15, test_ratio: float = 0.15) -> Dict[str, List[str]]:
         """
-        Create train/validation/test splits
+        Create simple train/val/test splits by shuffling unique image_ids.
         """
         df = pd.read_csv(metadata_path)
         
@@ -285,12 +316,12 @@ class VinBigDataProcessor:
         return splits
 
 def main():
-    """Main function for data preparation pipeline"""
+    """Command-line entry for running basic data prep steps."""
     import argparse
     
     parser = argparse.ArgumentParser(description="VinBigData Data Preparation")
     parser.add_argument("--data_dir", type=str, required=True, help="Path to raw dataset")
-    parser.add_argument("--subset_size", type=float, default=5.0, help="Subset size in GB")
+    parser.add_argument("--subset_size", type=float, default=2.0, help="Subset size in GB")
     parser.add_argument("--convert_images", action="store_true", help="Convert DICOM to PNG")
     parser.add_argument("--convert_annotations", action="store_true", help="Convert annotations")
     parser.add_argument("--create_splits", action="store_true", help="Create train/val/test splits")
@@ -305,7 +336,7 @@ def main():
     
     # Create subset
     if args.subset_size > 0:
-        selected_files = processor.create_5gb_subset(args.subset_size)
+        selected_files = processor.create_subset(args.subset_size)
         print(f"Created subset with {len(selected_files)} files")
     
     # Convert images
